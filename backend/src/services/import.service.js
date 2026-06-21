@@ -7,6 +7,12 @@
 import { pool } from '../config/db.js';
 import { ApiError } from '../utils/ApiError.js';
 
+// ─── Safe ID Helper ─────────────────────────────────────────────────────────
+const safeInt = (val) => {
+  const num = parseInt(val, 10);
+  return isNaN(num) ? null : num;
+};
+
 // ── Policy constants ──────────────────────────────────────────────────────────
 
 const USD_TO_INR_RATE = 83.5;      // Fixed at import time. See DECISIONS.md §3.
@@ -68,7 +74,10 @@ const key = s => (s || '').trim().toLowerCase();
 // ── Main importer ─────────────────────────────────────────────────────────────
 
 export const processImport = async (csvText, groupId, importedBy, filename = 'expenses_export.csv') => {
-  const memberMap = await buildMemberMap(groupId);
+  const safeGroupId = safeInt(groupId);
+  if (!safeGroupId) throw new ApiError(400, 'Invalid group ID');
+
+  const memberMap = await buildMemberMap(safeGroupId);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -76,7 +85,7 @@ export const processImport = async (csvText, groupId, importedBy, filename = 'ex
     const { rows: [sess] } = await client.query(
       `INSERT INTO import_sessions (group_id, imported_by, filename, status)
        VALUES ($1,$2,$3,'pending') RETURNING id`,
-      [groupId, importedBy, filename]
+      [safeGroupId, importedBy, filename]
     );
     const sid = sess.id;
 
@@ -133,9 +142,7 @@ export const processImport = async (csvText, groupId, importedBy, filename = 'ex
       // ① Malformed row
       const maxC = Math.max(...Object.values(C).filter(v => v >= 0));
       if (row.length < maxC + 1) {
-        flag('malformed_row',
-          `Row has ${row.length} columns, expected at least ${maxC + 1}`,
-          ACTION.SKIPPED);
+        flag('malformed_row', `Row has ${row.length} columns, expected at least ${maxC + 1}`, ACTION.SKIPPED);
       }
 
       // ② Missing required fields
@@ -150,9 +157,7 @@ export const processImport = async (csvText, groupId, importedBy, filename = 'ex
       // ③ Date parsing
       const parsedDate = parseDate(rawDate);
       if (!parsedDate) {
-        flag('invalid_date',
-          `Cannot parse date "${rawDate}" — defaulted to today (${today})`,
-          ACTION.CONVERTED);
+        flag('invalid_date', `Cannot parse date "${rawDate}" — defaulted to today (${today})`, ACTION.CONVERTED);
       }
       const expDate = parsedDate || today;
 
@@ -182,9 +187,7 @@ export const processImport = async (csvText, groupId, importedBy, filename = 'ex
       if (numAmt < 0) {
         finalAmt = Math.abs(numAmt);
         category = 'refund';
-        flag('negative_amount',
-          `Negative amount (${numAmt}) treated as refund; imported as ₹${finalAmt}`,
-          ACTION.CONVERTED);
+        flag('negative_amount', `Negative amount (${numAmt}) treated as refund; imported as ₹${finalAmt}`, ACTION.CONVERTED);
       }
 
       // ⑧ Currency
@@ -192,9 +195,7 @@ export const processImport = async (csvText, groupId, importedBy, filename = 'ex
       if (rawCurr.toUpperCase() === 'USD') {
         origCurr = 'USD'; origAmt = finalAmt; fxRate = USD_TO_INR_RATE;
         finalAmt = parseFloat((finalAmt * USD_TO_INR_RATE).toFixed(2));
-        flag('usd_amount',
-          `$${origAmt} USD → ₹${finalAmt} INR at rate ₹${fxRate}/USD`,
-          ACTION.CONVERTED);
+        flag('usd_amount', `$${origAmt} USD → ₹${finalAmt} INR at rate ₹${fxRate}/USD`, ACTION.CONVERTED);
       } else if (rawCurr.toUpperCase() !== 'INR' && rawCurr !== '') {
         flag('unknown_currency', `Currency "${rawCurr}" unrecognised — treated as INR`, ACTION.CONVERTED);
       }
@@ -202,9 +203,7 @@ export const processImport = async (csvText, groupId, importedBy, filename = 'ex
 
       // ⑨ Settlement
       if (SETTLEMENT_KEYWORDS.some(kw => rawDesc.toLowerCase().includes(kw))) {
-        flag('settlement_as_expense',
-          `"${rawDesc}" looks like a payment/settlement, not a shared expense — needs review`,
-          ACTION.PENDING);
+        flag('settlement_as_expense', `"${rawDesc}" looks like a payment/settlement — needs review`, ACTION.PENDING);
       }
 
       // ⑩ Resolve payer
@@ -214,19 +213,15 @@ export const processImport = async (csvText, groupId, importedBy, filename = 'ex
         flag('unknown_member', `Payer "${rawPayer}" is not in this group`, ACTION.PENDING);
       }
 
-      // ⑪ Membership date checks for payer
+      // ⑪ Membership date checks
       if (payer) {
         const joined = payer.joined_at ? payer.joined_at.toISOString().split('T')[0] : null;
         const left   = payer.left_at   ? payer.left_at.toISOString().split('T')[0]   : null;
         if (joined && expDate < joined) {
-          flag('member_before_join',
-            `${rawPayer} joined on ${joined} but this expense is dated ${expDate}`,
-            ACTION.PENDING);
+          flag('member_before_join', `${rawPayer} joined on ${joined} but expense is ${expDate}`, ACTION.PENDING);
         }
         if (left && expDate > left) {
-          flag('member_not_active',
-            `${rawPayer} left on ${left} but this expense is dated ${expDate}`,
-            ACTION.PENDING);
+          flag('member_not_active', `${rawPayer} left on ${left} but expense is ${expDate}`, ACTION.PENDING);
         }
       }
 
@@ -236,14 +231,12 @@ export const processImport = async (csvText, groupId, importedBy, filename = 'ex
         for (const n of rawWith.split(/[;|+\/,]/).map(n => n.trim()).filter(Boolean)) {
           const m = memberMap[key(n)];
           if (!m) {
-            flag('unknown_member', `Split member "${n}" not in group — excluded from split`, ACTION.CONVERTED);
+            flag('unknown_member', `Split member "${n}" not in group — excluded`, ACTION.CONVERTED);
             continue;
           }
           const left = m.left_at ? m.left_at.toISOString().split('T')[0] : null;
           if (left && expDate > left) {
-            flag('member_not_active',
-              `${n} left on ${left} before expense date ${expDate} — excluded from split`,
-              ACTION.CONVERTED);
+            flag('member_not_active', `${n} left on ${left} — excluded from split`, ACTION.CONVERTED);
             continue;
           }
           splitIds.push(m.user_id);
@@ -260,28 +253,23 @@ export const processImport = async (csvText, groupId, importedBy, filename = 'ex
         if (splitIds.length === 0) splitIds = Object.values(memberMap).map(m => m.user_id);
       }
 
-      // ⑬ Exact duplicate
+      // ⑬ & ⑭ Duplicate checks (unchanged)
       const exactK = `${key(rawDesc)}|${finalAmt}|${expDate}|${payerKey}`;
       if (seenExact.has(exactK)) {
-        flag('duplicate_exact',
-          `Exact duplicate of row ${seenExact.get(exactK)} (same desc/amount/date/payer) — needs review`,
-          ACTION.PENDING);
+        flag('duplicate_exact', `Exact duplicate of row ${seenExact.get(exactK)}`, ACTION.PENDING);
       } else {
         seenExact.set(exactK, rowNum);
       }
 
-      // ⑭ Fuzzy duplicate (same desc+date+payer, different amount)
       const fuzzyK = `${key(rawDesc)}|${expDate}|${payerKey}`;
       if (seenFuzzy.has(fuzzyK) && !seenExact.has(exactK)) {
         const prior = seenFuzzy.get(fuzzyK);
-        flag('duplicate_similar',
-          `Similar to row ${prior.rowNum}: same description/date/payer but amounts differ ₹${prior.amount} vs ₹${finalAmt} — which is correct?`,
-          ACTION.PENDING);
+        flag('duplicate_similar', `Similar to row ${prior.rowNum} (amounts differ)`, ACTION.PENDING);
       } else if (!seenFuzzy.has(fuzzyK)) {
         seenFuzzy.set(fuzzyK, { rowNum, amount: finalAmt });
       }
 
-      // ⑮ Normalise split type
+      // ⑮ Split type
       let splitType = 'equal';
       const sk = key(rawSplit);
       if (['equal','equally'].includes(sk)) splitType = 'equal';
@@ -289,10 +277,10 @@ export const processImport = async (csvText, groupId, importedBy, filename = 'ex
       else if (['percentage','percent','%'].includes(sk)) splitType = 'percentage';
       else if (['shares','share','ratio','parts'].includes(sk)) splitType = 'shares';
       else if (rawSplit) {
-        flag('unknown_split_type', `Split type "${rawSplit}" unknown — defaulted to equal`, ACTION.CONVERTED);
+        flag('unknown_split_type', `Unknown split type "${rawSplit}" — defaulted to equal`, ACTION.CONVERTED);
       }
 
-      // ── Pending → store for user review ──────────────────────────
+      // ── Pending rows ─────────────────────────────
       if (needsApproval) {
         const fids = await saveFlags(client, sid, rowNum, rawLine, rawJSON, flags, null);
         await client.query(
@@ -314,7 +302,7 @@ export const processImport = async (csvText, groupId, importedBy, filename = 'ex
            (group_id, paid_by, amount, description, category, split_type,
             expense_date, original_currency, original_amount, fx_rate)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-        [groupId, payerId, finalAmt, rawDesc, category, splitType,
+        [safeGroupId, payerId, finalAmt, rawDesc, category, splitType,
          expDate, origCurr, origAmt, fxRate]
       );
       const eid = exp.id;
@@ -373,50 +361,67 @@ async function saveFlags(client, sid, rowNum, rawLine, rawJSON, flags, expenseId
 // ── Public helpers ────────────────────────────────────────────────────────────
 
 export const buildMemberMap = async (groupId) => {
+  const safeGroupId = safeInt(groupId);
+  if (!safeGroupId) throw new ApiError(400, 'Invalid group ID');
+
   const { rows } = await pool.query(
-    `SELECT u.id AS user_id, u.name, gm.joined_at, gm.left_at
-     FROM group_members gm JOIN users u ON u.id=gm.user_id
-     WHERE gm.group_id=$1`,
-    [groupId]
+    `SELECT u.id AS user_id, u.name, gm.joined_at, 
+            COALESCE(gm.left_at, NULL) as left_at
+     FROM group_members gm 
+     JOIN users u ON u.id = gm.user_id
+     WHERE gm.group_id = $1`,
+    [safeGroupId]
   );
+  
   const map = {};
   for (const r of rows) {
-    map[key(r.name)] = r;
-    const first = key(r.name).split(/\s+/)[0];
+    const k = key(r.name);
+    map[k] = r;
+    const first = k.split(/\s+/)[0];
     if (!map[first]) map[first] = r;
   }
   return map;
 };
 
 export const getImportSessions = async (groupId) => {
+  const safeGroupId = safeInt(groupId);
+  if (!safeGroupId) throw new ApiError(400, 'Invalid group ID');
+
   const { rows } = await pool.query(
     `SELECT s.*, u.name AS imported_by_name
      FROM import_sessions s JOIN users u ON u.id=s.imported_by
      WHERE s.group_id=$1 ORDER BY s.created_at DESC`,
-    [groupId]
+    [safeGroupId]
   );
   return rows;
 };
 
 export const getImportReport = async (sessionId) => {
-  const { rows } = await pool.query('SELECT * FROM import_sessions WHERE id=$1', [sessionId]);
+  const safeId = safeInt(sessionId);
+  if (!safeId) throw new ApiError(400, 'Invalid session ID');
+
+  const { rows } = await pool.query('SELECT * FROM import_sessions WHERE id=$1', [safeId]);
   if (!rows.length) throw new ApiError(404, 'Import session not found');
+
   const { rows: anomalies } = await pool.query(
-    'SELECT * FROM import_anomalies WHERE session_id=$1 ORDER BY row_number, id', [sessionId]
+    'SELECT * FROM import_anomalies WHERE session_id=$1 ORDER BY row_number, id', [safeId]
   );
   const { rows: pending } = await pool.query(
     `SELECT p.*, a.description AS anomaly_description, a.anomaly_type
      FROM import_pending_rows p LEFT JOIN import_anomalies a ON a.id=p.anomaly_id
-     WHERE p.session_id=$1 ORDER BY p.row_number`, [sessionId]
+     WHERE p.session_id=$1 ORDER BY p.row_number`, [safeId]
   );
   return { session: rows[0], anomalies, pending };
 };
 
 export const resolvePendingRow = async (pendingRowId, action) => {
+  const safePendingId = safeInt(pendingRowId);
+  if (!safePendingId) throw new ApiError(400, 'Invalid pending row ID');
+
   const { rows } = await pool.query(
     `SELECT p.*, s.group_id FROM import_pending_rows p
      JOIN import_sessions s ON s.id=p.session_id WHERE p.id=$1`,
-    [pendingRowId]
+    [safePendingId]
   );
   if (!rows.length) throw new ApiError(404, 'Pending row not found');
   const pending = rows[0];
@@ -426,8 +431,14 @@ export const resolvePendingRow = async (pendingRowId, action) => {
     const data = typeof pending.raw_data === 'string' ? JSON.parse(pending.raw_data) : pending.raw_data;
     const memberMap = await buildMemberMap(pending.group_id);
     const payer = memberMap[key(data.paid_by)] ?? Object.values(memberMap)[0];
-    const amount = Math.abs(parseFloat(data.amount));
+    
+    if (!payer) {
+      throw new ApiError(400, 'No valid payer found in group');
+    }
+
+    const amount = Math.abs(parseFloat(data.amount) || 0);
     const expDate = parseDate(data.date) || new Date().toISOString().split('T')[0];
+
     const splitIds = Object.values(memberMap)
       .filter(m => {
         const j = m.joined_at ? m.joined_at.toISOString().split('T')[0] : '0000-01-01';
@@ -435,6 +446,7 @@ export const resolvePendingRow = async (pendingRowId, action) => {
         return expDate >= j && expDate <= l;
       })
       .map(m => m.user_id);
+
     const ids = splitIds.length > 0 ? splitIds : Object.values(memberMap).map(m => m.user_id);
 
     const { rows: [exp] } = await pool.query(
@@ -456,8 +468,9 @@ export const resolvePendingRow = async (pendingRowId, action) => {
 
   await pool.query(
     `UPDATE import_pending_rows SET user_action=$1, resolved_at=NOW(), expense_id=$2 WHERE id=$3`,
-    [action, expenseId, pendingRowId]
+    [action, expenseId, safePendingId]
   );
+
   if (pending.anomaly_id) {
     await pool.query(
       `UPDATE import_anomalies SET resolved=TRUE, resolution_note=$1, expense_id=$2 WHERE id=$3`,

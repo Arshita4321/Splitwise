@@ -6,8 +6,8 @@ import Spinner from '../ui/Spinner.jsx';
 import { uploadCSV, resolvePendingRow } from '../../api/import.js';
 import { useToast } from '../../hooks/useToast.js';
 import {
-  Upload, FileText, AlertTriangle, CheckCircle, XCircle,
-  Clock, ChevronDown, ChevronUp, Check, X,
+  Upload, AlertTriangle, CheckCircle, XCircle,
+  ChevronDown, ChevronUp, Check, X,
 } from 'lucide-react';
 
 // ── Anomaly type meta ─────────────────────────────────────────────────────────
@@ -64,7 +64,7 @@ function StatCard({ label, value, color }) {
   );
 }
 
-function AnomalyRow({ a, rowNum }) {
+function AnomalyRow({ a }) {
   const [open, setOpen] = useState(false);
   const meta = ANOMALY_META[a.anomaly_type] || { label: a.anomaly_type, color: 'var(--text-2)', icon: '⚠️' };
   return (
@@ -185,41 +185,63 @@ function PendingReviewPanel({ pending, sessionId, onResolved }) {
 
 export default function ImportModal({ open, onClose, groupId, onImported }) {
   const { toast } = useToast();
-  const fileRef   = useRef(null);
+  const fileRef = useRef(null);
 
-  const [stage, setStage]       = useState('upload'); // upload | uploading | report
+  const [stage, setStage] = useState('upload');
   const [dragOver, setDragOver] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [result, setResult]     = useState(null);
-  const [pending, setPending]   = useState([]);
-  const [filter, setFilter]     = useState('all'); // all | skipped | converted | awaiting_approval | imported
+  const [result, setResult] = useState(null);
+  const [pending, setPending] = useState([]);
+  const [filter, setFilter] = useState('all');
 
   const reset = () => {
-    setStage('upload'); setProgress(0); setResult(null);
-    setPending([]); setFilter('all');
+    setStage('upload');
+    setProgress(0);
+    setResult(null);
+    setPending([]);
+    setFilter('all');
   };
 
   const handleFile = useCallback(async (file) => {
     if (!file) return;
     if (!file.name.endsWith('.csv')) {
-      toast({ type: 'error', message: 'Please upload a .csv file' }); return;
+      toast({ type: 'error', message: 'Please upload a .csv file' });
+      return;
     }
-    setStage('uploading'); setProgress(0);
+
+    setStage('uploading');
+    setProgress(0);
+
     try {
       const res = await uploadCSV(groupId, file, setProgress);
       const data = res.data.data;
+
       setResult(data);
       setPending(data.anomalies?.filter(a => a.action_taken === 'awaiting_approval' && !a.resolved) || []);
       setStage('report');
+
       onImported?.();
+
+      // Auto close if no pending reviews
+      if (!data.pending || data.pending === 0) {
+        setTimeout(() => {
+          reset();
+          onClose();
+        }, 1800);
+      }
     } catch (e) {
-      toast({ type: 'error', message: e.response?.data?.message || 'Import failed' });
+      console.error(e);
+      toast({
+        type: 'error',
+        message: e.response?.data?.message || 'Import failed. Please check server logs.'
+      });
       setStage('upload');
     }
-  }, [groupId, onImported, toast]);
+  }, [groupId, onImported, onClose, toast]);
 
   const onDrop = e => {
-    e.preventDefault(); setDragOver(false);
+    e.preventDefault();
+    setDragOver(false);
     handleFile(e.dataTransfer.files[0]);
   };
 
@@ -229,14 +251,9 @@ export default function ImportModal({ open, onClose, groupId, onImported }) {
     a => filter === 'all' || a.action_taken === filter
   ) || [];
 
-  // Pending rows for review panel (re-fetched from result)
-  const pendingRows = result?.anomalies
-    ?.filter(a => a.action_taken === 'awaiting_approval' && !a.resolved)
-    ?? [];
-
   return (
-    <Modal open={open} onClose={() => { reset(); onClose(); }} title="Import CSV" width="640px">
-      {/* ── Upload stage ── */}
+    <Modal open={open} onClose={() => { reset(); onClose(); }} title="Import CSV" width="680px">
+      {/* Upload Stage */}
       {stage === 'upload' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <div
@@ -246,8 +263,10 @@ export default function ImportModal({ open, onClose, groupId, onImported }) {
             onDrop={onDrop}
             style={{
               border: `2px dashed ${dragOver ? 'var(--accent)' : 'var(--border)'}`,
-              borderRadius: 'var(--radius-lg)', padding: '48px 24px',
-              textAlign: 'center', cursor: 'pointer',
+              borderRadius: 'var(--radius-lg)',
+              padding: '48px 24px',
+              textAlign: 'center',
+              cursor: 'pointer',
               background: dragOver ? 'var(--accent-dim)' : 'var(--surface)',
               transition: 'var(--transition)',
             }}
@@ -280,7 +299,7 @@ export default function ImportModal({ open, onClose, groupId, onImported }) {
         </div>
       )}
 
-      {/* ── Uploading stage ── */}
+      {/* Uploading Stage */}
       {stage === 'uploading' && (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px', padding: '40px 0' }}>
           <Spinner size={36} />
@@ -300,30 +319,24 @@ export default function ImportModal({ open, onClose, groupId, onImported }) {
         </div>
       )}
 
-      {/* ── Report stage ── */}
+      {/* Report Stage */}
       {stage === 'report' && result && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          {/* Stats */}
           <div style={{ display: 'flex', gap: '10px' }}>
-            <StatCard label="Total Rows"  value={result.total}     />
-            <StatCard label="Imported"    value={result.imported + result.converted} color="var(--green)" />
-            <StatCard label="Skipped"     value={result.skipped}   color="var(--red)" />
-            <StatCard label="Need Review" value={result.pending}   color="var(--amber)" />
+            <StatCard label="Total Rows" value={result.total} />
+            <StatCard label="Imported" value={result.imported + result.converted} color="var(--green)" />
+            <StatCard label="Skipped" value={result.skipped} color="var(--red)" />
+            <StatCard label="Need Review" value={result.pending} color="var(--amber)" />
           </div>
 
-          {/* Pending review panel */}
           {pending.length > 0 && (
             <PendingReviewPanel
-              pending={pending.map((a, i) => ({ id: i, ...a }))}
+              pending={pending}
               sessionId={result.session_id}
-              onResolved={() => {
-                // Remove resolved items optimistically
-                setPending(p => p.filter((_, idx) => false));
-              }}
+              onResolved={() => setPending([])}
             />
           )}
 
-          {/* Anomaly list */}
           {result.anomalies?.length > 0 && (
             <div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
@@ -349,11 +362,6 @@ export default function ImportModal({ open, onClose, groupId, onImported }) {
                 {filteredAnomalies.map((a, i) => (
                   <AnomalyRow key={i} a={a} />
                 ))}
-                {filteredAnomalies.length === 0 && (
-                  <p style={{ fontSize: '13px', color: 'var(--text-2)', textAlign: 'center', padding: '20px' }}>
-                    No anomalies match this filter.
-                  </p>
-                )}
               </div>
             </div>
           )}

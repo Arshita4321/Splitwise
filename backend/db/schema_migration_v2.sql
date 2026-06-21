@@ -1,3 +1,4 @@
+--backend/db/schema_migration_v2.sql
 -- ==========================================================================
 -- schema_migration_v2.sql
 -- Run AFTER schema.sql and schema_additions.sql

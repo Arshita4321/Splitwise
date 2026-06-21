@@ -13,6 +13,8 @@ import expenseRoutes from './routes/expense.routes.js';
 import balanceRoutes from './routes/balance.routes.js';
 import messageRoutes from './routes/message.routes.js';
 
+import importRoutes from './routes/import.routes.js';
+
 export const app = express();
 
 app.use(cors());
@@ -48,6 +50,7 @@ app.use('/api/groups',   groupRoutes);
 app.use('/api/expenses', expenseRoutes);
 app.use('/api/balances', balanceRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/import', importRoutes);
 
 // 404 fallback
 app.use((req, res) => {
