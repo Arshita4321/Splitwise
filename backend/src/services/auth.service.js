@@ -23,7 +23,7 @@ const generateToken = (user) => {
  * - Returns the created user (without password_hash) + a JWT
  */
 export const registerUser = async ({ name, email, password }) => {
-  const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+  const existing = await pool.query('SELECT id FROM users WHERE LOWER(email) = LOWER($1)', [email]);
 
   if (existing.rows.length > 0) {
     throw new ApiError(409, 'An account with this email already exists');
@@ -54,7 +54,7 @@ export const registerUser = async ({ name, email, password }) => {
  * "wrong password" to avoid leaking which emails are registered.
  */
 export const loginUser = async ({ email, password }) => {
-  const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+  const result = await pool.query('SELECT * FROM users WHERE LOWER(email) = LOWER($1)', [email]);
   const user = result.rows[0];
 
   if (!user) {

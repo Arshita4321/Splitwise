@@ -107,7 +107,7 @@ function PendingReviewPanel({ pending, sessionId, onResolved }) {
     try {
       await resolvePendingRow(row.id, action);
       toast({ type: 'success', message: `Row ${row.row_number} ${action}d` });
-      onResolved();
+      onResolved(row.id);
     } catch (e) {
       toast({ type: 'error', message: e.response?.data?.message || 'Failed' });
     } finally {
@@ -200,6 +200,9 @@ export default function ImportModal({ open, onClose, groupId, onImported }) {
     setResult(null);
     setPending([]);
     setFilter('all');
+    if (fileRef.current) {
+      fileRef.current.value = '';
+    }
   };
 
   const handleFile = useCallback(async (file) => {
@@ -333,7 +336,10 @@ export default function ImportModal({ open, onClose, groupId, onImported }) {
             <PendingReviewPanel
               pending={pending}
               sessionId={result.session_id}
-              onResolved={() => setPending([])}
+              onResolved={(resolvedId) => {
+                setPending(prev => prev.filter(r => r.id !== resolvedId));
+                onImported?.();
+              }}
             />
           )}
 

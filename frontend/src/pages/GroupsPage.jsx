@@ -25,7 +25,12 @@ export default function GroupsPage() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const handler = () => load();
+    window.addEventListener('group-update', handler);
+    return () => window.removeEventListener('group-update', handler);
+  }, []);
 
   const handleCreated = (group) => {
     setGroups(prev => [{ ...group, role: 'admin', member_count: 1 }, ...prev]);

@@ -152,7 +152,7 @@ export const removeMember = async (groupId, requesterId, targetUserId) => {
 export const inviteByEmail = async (groupId, invitedById, email) => {
   await getMember(groupId, invitedById);   // This is now safe inside getMember
 
-  const userRes = await pool.query('SELECT id, name, email FROM users WHERE email=$1', [email]);
+  const userRes = await pool.query('SELECT id, name, email FROM users WHERE LOWER(email)=LOWER($1)', [email]);
   if (!userRes.rows.length) throw new ApiError(404, 'No user found with that email');
   const invitedUser = userRes.rows[0];
 

@@ -47,6 +47,7 @@ export default function InviteBanner({ onResponded }) {
           : `Declined invite to "${invite.group_name}"`,
       });
       onResponded?.();
+      window.dispatchEvent(new Event('group-update'));
     } catch (err) {
       toast({ type: 'error', message: err.response?.data?.message || 'Something went wrong' });
     } finally {

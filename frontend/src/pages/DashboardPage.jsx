@@ -15,16 +15,21 @@ export default function DashboardPage() {
 
   useEffect(() => { setTitle('Dashboard'); }, [setTitle]);
 
+  const loadData = async () => {
+    try {
+      const [balRes, groupsRes] = await Promise.all([getMyBalances(), getMyGroups()]);
+      setBalances(balRes.data.data);
+      setGroups(groupsRes.data.data || []);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    (async () => {
-      try {
-        const [balRes, groupsRes] = await Promise.all([getMyBalances(), getMyGroups()]);
-        setBalances(balRes.data.data);
-        setGroups(groupsRes.data.data || []);
-      } finally {
-        setLoading(false);
-      }
-    })();
+    loadData();
+    const handler = () => loadData();
+    window.addEventListener('group-update', handler);
+    return () => window.removeEventListener('group-update', handler);
   }, []);
 
   if (loading) {

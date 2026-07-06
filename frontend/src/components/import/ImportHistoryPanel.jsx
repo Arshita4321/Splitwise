@@ -175,7 +175,7 @@ function SessionRow({ session, onResolved }) {
   );
 }
 
-export default function ImportHistoryPanel({ groupId, onResolved }) {
+export default function ImportHistoryPanel({ groupId, refreshTrigger, onResolved }) {
   const { toast }     = useToast();
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading]   = useState(true);
@@ -186,7 +186,7 @@ export default function ImportHistoryPanel({ groupId, onResolved }) {
       .then(res => setSessions(res.data.data || []))
       .catch(() => toast({ type: 'error', message: 'Failed to load import history' }))
       .finally(() => setLoading(false));
-  }, [groupId]);
+  }, [groupId, refreshTrigger]);
 
   if (loading) return <Spinner size={20} />;
   if (!sessions.length) return (

@@ -15,6 +15,9 @@ import {
 const router = Router();
 router.use(authenticate);
 
+// My pending invites (across all groups) - MUST BE FIRST to avoid collision with /:id and /:id/invites
+router.get('/me/invites', getMyInvites);
+
 // Groups CRUD
 router.post('/',        validate(createGroupSchema), createGroup);
 router.get('/',         getMyGroups);
@@ -31,8 +34,5 @@ router.delete('/:id/members/:userId',   removeMember);
 router.post('/:id/invites',                        validate(inviteUserSchema),    inviteUser);
 router.get('/:id/invites',                         getGroupInvites);
 router.post('/invites/:inviteId/respond',           validate(respondInviteSchema), respondInvite);
-
-// My pending invites (across all groups)
-router.get('/me/invites', getMyInvites);
 
 export default router;

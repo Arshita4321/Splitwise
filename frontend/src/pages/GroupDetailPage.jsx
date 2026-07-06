@@ -50,6 +50,7 @@ export default function GroupDetailPage() {
   const [settlePrefill, setSettlePrefill] = useState(null);
   const [inviteOpen, setInviteOpen]   = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importTrigger, setImportTrigger] = useState(0);
 
   const isAdmin = group?.role === 'admin';
 
@@ -104,9 +105,10 @@ export default function GroupDetailPage() {
     await Promise.all([loadExpenses(), loadBalances()]);
   };
 
-  const refreshAfterImport = async () => {
+  const refreshAfterImport = useCallback(async () => {
     await Promise.all([loadExpenses(), loadBalances()]);
-  };
+    setImportTrigger(prev => prev + 1);
+  }, [loadExpenses, loadBalances]);
 
   const handleExpenseSaved = async () => {
     await refreshAfterExpenseChange();
@@ -235,6 +237,7 @@ export default function GroupDetailPage() {
             </div>
             <ImportHistoryPanel 
               groupId={groupId} 
+              refreshTrigger={importTrigger}
               onResolved={refreshAfterImport} 
             />
           </div>
@@ -348,7 +351,10 @@ export default function GroupDetailPage() {
 
       <ImportModal
         open={importModalOpen}
-        onClose={() => setImportModalOpen(false)}
+        onClose={() => {
+          setImportModalOpen(false);
+          refreshAfterImport();
+        }}
         groupId={groupId}
         onImported={refreshAfterImport}
       />
